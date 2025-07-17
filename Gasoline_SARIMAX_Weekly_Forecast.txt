@@ -1,0 +1,96 @@
+# Import necessary libraries
+import pandas as pd
+import numpy as np
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from math import sqrt
+import matplotlib.pyplot as plt
+
+# Load Excel file containing demand and exogenous variables
+file_path = "/Users/dylanfei/Downloads/Dylan Fei - Gasoline Dataset for Forecasts (Summer Internship Dataset).xlsx"
+df = pd.read_excel(file_path, sheet_name="Sheet1")
+
+# Convert 'Date' column to datetime and sort index
+df['Date'] = pd.to_datetime(df['Date'])
+df.set_index('Date', inplace=True)
+df = df.sort_index()
+
+# Define endogenous (target) and exogenous variables
+y = df['Demand']
+exog = df[['Unemployment Rate (%)', 'RBOB Gasoline Last Price (XB1)', 'Vehicle Miles Traveled (Miles)']]
+
+# Perform Augmented Dickey-Fuller test for stationarity
+from statsmodels.tsa.stattools import adfuller
+adf_result = adfuller(y)
+print(f"ADF Statistic: {adf_result[0]:.4f}")
+print(f"p-value: {adf_result[1]:.4f}")
+
+# Split the data into training (all but last 12 months) and testing (last 12 months)
+train_y = y.iloc[:-12]
+test_y = y.iloc[-12:]
+train_exog = exog.iloc[:-12]
+test_exog = exog.iloc[-12:]
+
+# Fit SARIMAX model on training data
+model = SARIMAX(train_y, exog=train_exog, order=(1,1,1), seasonal_order=(1,1,1,12),
+                enforce_stationarity=False, enforce_invertibility=False)
+results = model.fit(disp=False)
+
+# Generate forecast on test set
+forecast = results.get_forecast(steps=12, exog=test_exog)
+forecast_mean = forecast.predicted_mean
+conf_int = forecast.conf_int()
+
+# Calculate error metrics
+rmse = sqrt(mean_squared_error(test_y, forecast_mean))
+mae = mean_absolute_error(test_y, forecast_mean)
+
+# Plot actual vs forecasted demand with confidence intervals
+plt.figure(figsize=(12, 6))
+plt.plot(y.index[-36:], y[-36:], label='Actual Demand', color='darkblue')
+plt.plot(test_y.index, forecast_mean, label='Forecasted Demand', linestyle='--', color='skyblue')
+plt.fill_between(test_y.index, conf_int.iloc[:, 0], conf_int.iloc[:, 1], color='lightblue', alpha=0.3)
+plt.title("Gasoline Demand – Seasonal Forecast (SARIMAX)", fontsize=14)
+plt.xlabel("Date")
+plt.ylabel("Demand (KBD)")
+plt.legend()
+plt.text(test_y.index[-1], max(y[-36:])*0.9, f'RMSE: {rmse:.2f} KBD\nMAE: {mae:.2f} KBD',
+         bbox=dict(facecolor='white', alpha=0.7), ha='right')
+plt.tight_layout()
+plt.show()
+
+# Set forecast window for Prompt-Week predictions (adjust these to change forecast period)
+weekly_start = pd.Timestamp("2025-07-04")  # First Friday of July
+weekly_end = pd.Timestamp("2025-09-26")  # New end date (last Friday of September)
+weekly_dates = pd.date_range(start=weekly_start, end=weekly_end, freq='W-FRI')
+
+# Create future exogenous variables based on last known values (repeated)
+last_exog = exog.iloc[-1]
+future_exog = pd.DataFrame([last_exog.values] * len(weekly_dates), columns=exog.columns)
+future_exog.index = pd.RangeIndex(start=len(y), stop=len(y) + len(weekly_dates))
+
+# Fit SARIMAX model on entire dataset to generate prompt-week forecasts
+full_model = SARIMAX(y, exog=exog, order=(1,1,1), seasonal_order=(1,1,1,12),
+                     enforce_stationarity=False, enforce_invertibility=False)
+full_results = full_model.fit(disp=False)
+
+# Predict for each Friday in the forecast window
+weekly_forecast = full_results.get_prediction(steps=len(weekly_dates), exog=future_exog)
+weekly_mean = weekly_forecast.predicted_mean
+weekly_conf_int = weekly_forecast.conf_int()
+
+# Ensure all components have matching lengths
+min_len = min(len(weekly_dates), len(weekly_mean), len(weekly_conf_int))
+
+# Create dataframe with forecast results
+weekly_forecast_df = pd.DataFrame({
+    'Date': weekly_dates[:min_len],
+    'Forecasted Demand (KBD)': weekly_mean.values[:min_len],
+    'Lower Bound (95%)': weekly_conf_int.iloc[:min_len, 0].values,
+    'Upper Bound (95%)': weekly_conf_int.iloc[:min_len, 1].values
+})
+
+# Save forecast to Excel
+output_path = "/Users/dylanfei/Downloads/Weekly_Gasoline_Demand_Forecast_July_August_2025.xlsx"
+weekly_forecast_df.to_excel(output_path, index=False)
+print(f"Weekly forecast saved to: {output_path}")
