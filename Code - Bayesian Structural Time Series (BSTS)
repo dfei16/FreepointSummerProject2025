@@ -1,0 +1,44 @@
+import pandas as pd
+from datetime import datetime
+from bsts import bsts, LocalLevel, TrendSpikeSlab, Seasonality, plot_components
+import matplotlib.pyplot as plt
+
+file_path = "/mnt/data/Short Term DTN Data for SARIMAX Forecasting.xlsx"
+xls = pd.ExcelFile(file_path)
+sheet_names = xls.sheet_names
+sheet_names
+
+df = xls.parse('Sheet1')
+df.head()
+
+df['Date'] = pd.to_datetime(df['Date'])
+df.set_index('Date', inplace=True)
+df = df.asfreq('MS')  # Monthly start frequency
+df = df[['DTN Demand']].dropna()
+
+components = [
+    LocalLevel(),                 # Local level component
+    Seasonality(period=12)       # Seasonality for monthly data
+]
+
+model = bsts(df['DTN Demand'], components, niter=1000)
+
+forecast_horizon = 2
+forecast = model.forecast(forecast_horizon)
+
+plot_components(model)
+plt.show()
+
+plt.figure(figsize=(10, 4))
+plt.plot(df.index, df['DTN Demand'], label='Observed')
+forecast_dates = pd.date_range(df.index[-1] + pd.DateOffset(months=1), periods=forecast_horizon, freq='MS')
+plt.plot(forecast_dates, forecast.mean(), label='Forecast')
+plt.fill_between(forecast_dates, forecast.mean() - 1.96 * forecast.std(), forecast.mean() + 1.96 * forecast.std(),
+                 color='gray', alpha=0.3, label='95% CI')
+plt.legend()
+plt.title("BSTS Forecast of DTN Demand (Short-Term)")
+plt.xlabel("Date")
+plt.ylabel("Demand")
+plt.tight_layout()
+plt.show()
+
