@@ -1,0 +1,64 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from xgboost import XGBRegressor
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+
+# Load Excel File
+file_path = "/Users/dylanfei/Downloads/Updated with RBOB Variable - EIA Gasoline Demand Forecasting - USE FOR EIA GASOLINE FORECAST.xlsx"
+df = pd.read_excel(file_path, sheet_name='Sheet1')
+
+# Ensure date index
+df['Date'] = pd.to_datetime(df['Date'])
+df.set_index('Date', inplace=True)
+df.sort_index(inplace=True)
+
+# Feature engineering function
+def create_features(df, lags=[1, 12]):
+    df_feat = df.copy()
+    df_feat['Demand'] = df['Demand']  # Ensure target column is kept
+    for lag in lags:
+        df_feat[f'Demand_lag_{lag}'] = df_feat['Demand'].shift(lag)
+    df_feat['month'] = df_feat.index.month
+    return df_feat.dropna()
+
+# Include exogenous and target variable
+df_features = df[['Demand', 'Unemployment Rate (%)', 'RBOB Gasoline Last Price (XB1)', 'Vehicle Miles Traveled (Miles)']]
+df_features = create_features(df_features)
+
+# Define features and target
+X = df_features[['Demand_lag_1', 'Demand_lag_12', 'Unemployment Rate (%)', 'RBOB Gasoline Last Price (XB1)', 'Vehicle Miles Traveled (Miles)', 'month']]
+y = df_features['Demand']
+
+# XGBoost forecast function
+def run_xgboost_forecast(test_months):
+    train_end = -test_months
+    X_train, X_test = X[:train_end], X[train_end:]
+    y_train, y_test = y[:train_end], y[train_end:]
+
+    model = XGBRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=0)
+    model.fit(X_train, y_train)
+
+    forecast = pd.Series(model.predict(X_test), index=y_test.index)
+    rmse = np.sqrt(mean_squared_error(y_test, forecast))
+    mae = mean_absolute_error(y_test, forecast)
+
+    return forecast, y_test, rmse, mae
+
+# Run forecast on last 12 months
+forecast_12, actual_12, rmse_12, mae_12 = run_xgboost_forecast(12)
+
+# Plot forecast vs actual
+plt.figure(figsize=(14, 6))
+plt.plot(actual_12, label='Actual Demand', color='black', marker='o')
+plt.plot(forecast_12, label='XGBoost Forecast', linestyle='--', marker='x')
+plt.title(f'XGBoost Forecast — 12-Month Test Split\nRMSE = {rmse_12:.2f}, MAE = {mae_12:.2f}')
+plt.xlabel('Date')
+plt.ylabel('Demand (KBD)')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# Output RMSE and MAE
+print(f"Final Evaluation — 12-Month Split:\nRMSE: {rmse_12:.2f}\nMAE: {mae_12:.2f}")
