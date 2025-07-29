@@ -1,0 +1,56 @@
+# Bayesian Structural Time Series (BSTS) Forecasting Script
+
+import pandas as pd
+from datetime import datetime
+from bsts import bsts, LocalLevel, Seasonality, plot_components
+import matplotlib.pyplot as plt
+
+# Load Excel data
+file_path = "Dylan Fei - Gasoline Dataset for Forecasts (Summer Internship Dataset).xlsx"
+xls = pd.ExcelFile(file_path)
+df = xls.parse('Sheet1')
+
+# Convert and normalize dates
+df['Date'] = pd.to_datetime(df['Date'])
+df['Date'] = df['Date'].dt.to_period('M').dt.to_timestamp()
+df.set_index('Date', inplace=True)
+
+# Keep only Demand and set frequency
+df = df[['Demand']].asfreq('MS').dropna()
+
+# 12-month train/test split
+train = df.iloc[:-12]
+test = df.iloc[-12:]
+
+# Define BSTS components
+components = [
+    LocalLevel(),
+    Seasonality(period=12)
+]
+
+# Fit model
+model = bsts(train['Demand'], components, niter=1000)
+
+# Forecast
+forecast_horizon = 12
+forecast = model.forecast(forecast_horizon)
+
+# Plot components
+plot_components(model)
+plt.tight_layout()
+plt.show()
+
+# Plot forecast
+plt.figure(figsize=(12, 5))
+plt.plot(train.index, train['Demand'], label='Train', color='blue')
+plt.plot(test.index, test['Demand'], label='Test', color='red')
+forecast_index = test.index
+plt.plot(forecast_index, forecast.mean(), label='Forecast', color='green')
+plt.fill_between(forecast_index, forecast.mean() - 1.96 * forecast.std(),
+                 forecast.mean() + 1.96 * forecast.std(), color='gray', alpha=0.3, label='95% CI')
+plt.title("12-Month Forecast for Gasoline Demand (BSTS)")
+plt.xlabel("Date")
+plt.ylabel("Demand (KBD)")
+plt.legend()
+plt.tight_layout()
+plt.show()
